@@ -11,7 +11,6 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildBans,
     GatewayIntentBits.GuildModeration,
-    GatewayIntentBits.GuildRoles // 👈 Rol guard için gerekli
   ],
   partials: [Partials.Channel, Partials.GuildMember]
 });
