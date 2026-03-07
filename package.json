@@ -1,13 +1,13 @@
 {
   "name": "discord-guard-bot",
   "version": "1.0.0",
-  "description": "Profesyonel Discord guard botu",
+  "description": "Profesyonel Discord Guard Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "engines": {
-    "node": "22.x"
+    "node": "18.x"
   },
   "dependencies": {
     "discord.js": "^14.11.0",
