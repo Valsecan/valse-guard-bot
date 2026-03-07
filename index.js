@@ -1,214 +1,230 @@
-import { Client, GatewayIntentBits, Partials, Events, AuditLogEvent, SlashCommandBuilder, Routes } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, Events, AuditLogEvent, REST, Routes, SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
 import express from 'express';
 import dotenv from 'dotenv';
-import { REST } from '@discordjs/rest';
-
 dotenv.config();
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const GUILD_ID = process.env.GUILD_ID;
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const BOT_OWNER_ID = process.env.BOT_OWNER_ID;
+const CLIENT_ID = process.env.CLIENT_ID;
 
+// ==== Client ====
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildBans,
-    GatewayIntentBits.GuildModeration,
-    GatewayIntentBits.GuildMessages
+    GatewayIntentBits.GuildModeration
   ],
   partials: [Partials.Channel, Partials.GuildMember]
 });
 
-// ===== Web server (Railway) =====
+// ==== Web server ====
 const app = express();
-app.get('/', (req, res) => res.send('Guard bot aktif 😎'));
-app.listen(8080, () => console.log('Web server 8080 portunda açık'));
+app.get("/", (req,res)=>res.send("Guard bot aktif 😎"));
+app.listen(8080, ()=>console.log("Web server 8080 portunda açık"));
 
-// ===== Guard sistemleri =====
-let guardSettings = {
-  kanalGuard: true,
-  rolGuard: true,
-  uyeGuard: true,
-  botGuard: true
-};
-
+// ==== Backup & whitelist ====
 let backupChannels = {};
 let backupRoles = {};
 let whitelist = [];
+let guards = {
+  channel: true,
+  role: true,
+  member: true
+};
 
-// ===== Slash komutları =====
-const commands = [
-  new SlashCommandBuilder().setName('yardim').setDescription('Komutları gösterir'),
-  new SlashCommandBuilder().setName('whitelist').setDescription('Whitelist ekle/kaldır').addUserOption(o => o.setName('kullanici').setDescription('Kullanıcı seçin')),
-  new SlashCommandBuilder().setName('settings').setDescription('Guardları aç/kapat').addStringOption(o => o.setName('guard').setDescription('Hangi guard?').setRequired(true).addChoices(
-    { name: 'Kanal', value: 'kanalGuard' },
-    { name: 'Rol', value: 'rolGuard' },
-    { name: 'Üye', value: 'uyeGuard' },
-    { name: 'Bot', value: 'botGuard' }
-  ))
-];
-
-// Slash deploy
-const rest = new REST({ version: '10' }).setToken(TOKEN);
-(async () => {
-  try {
-    console.log('Slash komutları deploy ediliyor...');
-    await rest.put(Routes.applicationGuildCommands(BOT_OWNER_ID, GUILD_ID), { body: commands });
-    console.log('Slash komutları yüklendi.');
-  } catch (e) { console.error(e); }
-})();
-
-// ===== Yardımcı fonksiyon =====
+// ==== Utility ====
 async function punish(guild, userId, reason){
-  if(whitelist.includes(userId) || userId === BOT_OWNER_ID) return;
+  if(whitelist.includes(userId)) return;
   const member = await guild.members.fetch(userId).catch(()=>null);
-  if(!member) return;
-  if(!member.manageable) return;
+  if(!member || !member.manageable) return;
   await member.roles.set([]);
   if(client.logChannel) client.logChannel.send(`🚨 ${member.user.tag} cezalandırıldı; sebep: ${reason}`);
 }
 
-// ===== Ready =====
-client.once(Events.ClientReady, async () => {
+// ==== Ready ====
+client.once(Events.ClientReady, async ()=>{
   console.log(`Bot açıldı: ${client.user.tag}`);
-
   const guild = await client.guilds.fetch(GUILD_ID);
   client.logChannel = await guild.channels.fetch(LOG_CHANNEL_ID);
 
   // Kanal backup
   const channels = await guild.channels.fetch();
-  channels.forEach(ch => {
-    backupChannels[ch.id] = { name: ch.name, type: ch.type, parentId: ch.parentId };
+  channels.forEach(ch=>{
+    backupChannels[ch.id] = {
+      name: ch.name,
+      type: ch.type,
+      parentId: ch.parentId
+    };
   });
 
   // Rol backup
   const roles = await guild.roles.fetch();
-  roles.forEach(r => {
-    backupRoles[r.id] = { name: r.name, color: r.color, permissions: r.permissions.bitfield, hoist: r.hoist, mentionable: r.mentionable };
+  roles.forEach(r=>{
+    backupRoles[r.id] = {
+      name: r.name,
+      color: r.color,
+      permissions: r.permissions.bitfield,
+      hoist: r.hoist,
+      mentionable: r.mentionable
+    };
   });
 
-  console.log('Guard sistemi aktif ve yedekler hazır');
-  if(client.logChannel) client.logChannel.send('Guard sistemi aktif ve yedekler hazır');
+  console.log("Guard sistemi aktif ve yedekler hazır");
 });
 
-// ===== Slash komut dinleme =====
-client.on(Events.InteractionCreate, async interaction => {
+// ==== Slash komutlar ====
+const commands = [
+  new SlashCommandBuilder()
+    .setName('yardim')
+    .setDescription('Tüm komutları ve açıklamalarını gösterir'),
+  new SlashCommandBuilder()
+    .setName('whitelist')
+    .setDescription('Kullanıcı ekle/kaldır')
+    .addSubcommand(sub=>sub.setName('ekle').setDescription('Whitelist’e ekle').addUserOption(opt=>opt.setName('kullanici').setDescription('Kullanıcı').setRequired(true)))
+    .addSubcommand(sub=>sub.setName('kaldir').setDescription('Whitelist’ten çıkar').addUserOption(opt=>opt.setName('kullanici').setDescription('Kullanıcı').setRequired(true))),
+  new SlashCommandBuilder()
+    .setName('settings')
+    .setDescription('Guard ayarlarını değiştir')
+    .addBooleanOption(opt=>opt.setName('kanal').setDescription('Kanal guardını aç/kapat'))
+    .addBooleanOption(opt=>opt.setName('rol').setDescription('Rol guardını aç/kapat'))
+    .addBooleanOption(opt=>opt.setName('uye').setDescription('Üye guardını aç/kapat'))
+];
+
+const rest = new REST({ version: '10' }).setToken(TOKEN);
+(async ()=>{
+  try{
+    console.log("Slash komutları deploy ediliyor...");
+    await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
+    console.log("Slash komutları yüklendi.");
+  }catch(e){console.log(e);}
+})();
+
+// ==== Slash komut kullanımı ====
+client.on(Events.InteractionCreate, async interaction=>{
   if(!interaction.isChatInputCommand()) return;
-
-  const { commandName } = interaction;
+  const cmd = interaction.commandName;
   const userId = interaction.user.id;
-
-  if(![BOT_OWNER_ID, ...whitelist].includes(userId)){
-    return interaction.reply({ content: '❌ Komutu kullanamazsın!', ephemeral: true });
+  if(![BOT_OWNER_ID].includes(userId) && !whitelist.includes(userId)){
+    return interaction.reply({content:"🚫 Komutu kullanamazsınız!", ephemeral:true});
   }
 
-  if(commandName === 'yardim'){
-    return interaction.reply({ content: `
-/yardim - Komutları gösterir
-/whitelist @kullanici - Whitelist ekle/kaldır
-/settings guard - Guardları aç/kapat
-`, ephemeral: true });
+  if(cmd==='yardim'){
+    return interaction.reply({
+      content:`/yardim - Komutları gösterir
+/whitelist ekle/kaldır - Dokunulmaz kullanıcı ekle/kaldır
+/settings - Guard ayarlarını aç/kapat`
+    });
   }
 
-  if(commandName === 'whitelist'){
-    const target = interaction.options.getUser('kullanici');
-    if(!target) return interaction.reply({ content: '❌ Kullanıcı seçin', ephemeral: true });
-    if(whitelist.includes(target.id)){
-      whitelist = whitelist.filter(id => id !== target.id);
-      return interaction.reply({ content: `✅ ${target.tag} whitelistten kaldırıldı`, ephemeral: true });
-    } else {
-      whitelist.push(target.id);
-      return interaction.reply({ content: `✅ ${target.tag} whitelist eklendi`, ephemeral: true });
+  if(cmd==='whitelist'){
+    const sub = interaction.options.getSubcommand();
+    const user = interaction.options.getUser('kullanici');
+    if(sub==='ekle'){
+      if(!whitelist.includes(user.id)) whitelist.push(user.id);
+      return interaction.reply({content:`✅ ${user.tag} whitelist’e eklendi`, ephemeral:true});
+    }else if(sub==='kaldir'){
+      whitelist = whitelist.filter(id=>id!==user.id);
+      return interaction.reply({content:`❌ ${user.tag} whitelist’ten çıkarıldı`, ephemeral:true});
     }
   }
 
-  if(commandName === 'settings'){
-    const guard = interaction.options.getString('guard');
-    if(!guard) return interaction.reply({ content: '❌ Guard seçin', ephemeral: true });
-    guardSettings[guard] = !guardSettings[guard];
-    return interaction.reply({ content: `✅ ${guard} guard ${guardSettings[guard] ? 'aktif' : 'pasif'}`, ephemeral: true });
+  if(cmd==='settings'){
+    const kanal = interaction.options.getBoolean('kanal');
+    const rol = interaction.options.getBoolean('rol');
+    const uye = interaction.options.getBoolean('uye');
+
+    if(kanal!==null) guards.channel = kanal;
+    if(rol!==null) guards.role = rol;
+    if(uye!==null) guards.member = uye;
+
+    return interaction.reply({content:`⚙️ Guard ayarları güncellendi`, ephemeral:true});
   }
 });
 
-// ===== Kanal Guard =====
-client.on(Events.ChannelDelete, async channel => {
-  if(!guardSettings.kanalGuard) return;
-
-  const audit = await channel.guild.fetchAuditLogs({ type: AuditLogEvent.ChannelDelete, limit: 1 });
-  const executor = audit.entries.first()?.executor;
-  if(executor) punish(channel.guild, executor.id, 'kanal silme');
+// ==== Guardlar ====
+// Kanal silme
+client.on(Events.ChannelDelete, async channel=>{
+  if(!guards.channel) return;
+  const audit = await channel.guild.fetchAuditLogs({type:AuditLogEvent.ChannelDelete,limit:1});
+  const entry = audit.entries.first();
+  if(!entry) return;
+  punish(channel.guild, entry.executor.id, "kanal silme");
 
   const data = backupChannels[channel.id];
   if(data){
-    await channel.guild.channels.create({ name: data.name, type: data.type, parent: data.parentId });
+    await channel.guild.channels.create({name:data.name,type:data.type,parent:data.parentId});
     if(client.logChannel) client.logChannel.send(`🟢 Kanal geri oluşturuldu: ${data.name}`);
   }
 });
 
-client.on(Events.ChannelCreate, async channel => {
-  if(!guardSettings.kanalGuard) return;
-
-  const audit = await channel.guild.fetchAuditLogs({ type: AuditLogEvent.ChannelCreate, limit: 1 });
-  const executor = audit.entries.first()?.executor;
-  if(executor) punish(channel.guild, executor.id, 'kanal açma');
+// Kanal açma
+client.on(Events.ChannelCreate, async channel=>{
+  if(!guards.channel) return;
+  const audit = await channel.guild.fetchAuditLogs({type:AuditLogEvent.ChannelCreate,limit:1});
+  const entry = audit.entries.first();
+  if(!entry) return;
+  punish(channel.guild, entry.executor.id, "kanal açma");
 });
 
-// ===== Rol Guard =====
-client.on(Events.RoleDelete, async role => {
-  if(!guardSettings.rolGuard) return;
-
-  const audit = await role.guild.fetchAuditLogs({ type: AuditLogEvent.RoleDelete, limit: 1 });
-  const executor = audit.entries.first()?.executor;
-  if(executor) punish(role.guild, executor.id, 'rol silme');
+// Rol silme
+client.on(Events.RoleDelete, async role=>{
+  if(!guards.role) return;
+  const audit = await role.guild.fetchAuditLogs({type:AuditLogEvent.RoleDelete,limit:1});
+  const entry = audit.entries.first();
+  if(!entry) return;
+  punish(role.guild, entry.executor.id, "rol silme");
 
   const data = backupRoles[role.id];
   if(data){
     await role.guild.roles.create({
-      name: data.name,
-      color: data.color,
-      permissions: data.permissions,
-      hoist: data.hoist,
-      mentionable: data.mentionable
+      name:data.name,
+      color:data.color,
+      permissions:data.permissions,
+      hoist:data.hoist,
+      mentionable:data.mentionable
     });
     if(client.logChannel) client.logChannel.send(`🟢 Rol geri oluşturuldu: ${data.name}`);
   }
 });
 
-client.on(Events.RoleCreate, async role => {
-  if(!guardSettings.rolGuard) return;
-
-  const audit = await role.guild.fetchAuditLogs({ type: AuditLogEvent.RoleCreate, limit: 1 });
-  const executor = audit.entries.first()?.executor;
-  if(executor) punish(role.guild, executor.id, 'rol oluşturma');
+// Rol oluşturma
+client.on(Events.RoleCreate, async role=>{
+  if(!guards.role) return;
+  const audit = await role.guild.fetchAuditLogs({type:AuditLogEvent.RoleCreate,limit:1});
+  const entry = audit.entries.first();
+  if(!entry) return;
+  punish(role.guild, entry.executor.id, "rol oluşturma");
 });
 
-// ===== Üye Guard =====
-client.on(Events.GuildMemberRemove, async member => {
-  if(!guardSettings.uyeGuard) return;
-
-  const audit = await member.guild.fetchAuditLogs({ type: AuditLogEvent.MemberKick, limit: 1 });
-  const executor = audit.entries.first()?.executor;
-  if(executor) punish(member.guild, executor.id, 'kick atma');
+// Ban guard
+client.on(Events.GuildBanAdd, async ban=>{
+  if(!guards.member) return;
+  const audit = await ban.guild.fetchAuditLogs({type:AuditLogEvent.MemberBanAdd,limit:1});
+  const entry = audit.entries.first();
+  if(!entry) return;
+  punish(ban.guild, entry.executor.id, "ban atma");
 });
 
-client.on(Events.GuildBanAdd, async ban => {
-  if(!guardSettings.uyeGuard) return;
-
-  const audit = await ban.guild.fetchAuditLogs({ type: AuditLogEvent.MemberBanAdd, limit: 1 });
-  const executor = audit.entries.first()?.executor;
-  if(executor) punish(ban.guild, executor.id, 'ban atma');
+// Kick guard
+client.on(Events.GuildMemberRemove, async member=>{
+  if(!guards.member) return;
+  const audit = await member.guild.fetchAuditLogs({type:AuditLogEvent.MemberKick,limit:1});
+  const entry = audit.entries.first();
+  if(!entry) return;
+  punish(member.guild, entry.executor.id, "kick atma");
 });
 
-// ===== Bot Guard =====
-client.on(Events.GuildMemberAdd, async member => {
-  if(!guardSettings.botGuard) return;
+// Bot ekleme
+client.on(Events.GuildMemberAdd, async member=>{
+  if(!guards.member) return;
   if(!member.user.bot) return;
-
-  const audit = await member.guild.fetchAuditLogs({ type: AuditLogEvent.BotAdd, limit: 1 });
-  const executor = audit.entries.first()?.executor;
-  if(executor) punish(member.guild, executor.id, 'bot ekleme');
+  const audit = await member.guild.fetchAuditLogs({type:AuditLogEvent.BotAdd,limit:1});
+  const entry = audit.entries.first();
+  if(!entry) return;
+  punish(member.guild, entry.executor.id, "bot ekleme");
   await member.kick();
 });
 
