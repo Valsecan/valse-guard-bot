@@ -3,10 +3,19 @@ const fs = require("fs");
 
 module.exports = (client) => {
 
+  // Slash komutu tanımlıyoruz
   client.once("ready", async () => {
     console.log(`Bot aktif: ${client.user.tag}`);
+
+    // Burada '/panel' komutunu Discord'a kaydediyoruz
+    const command = {
+      name: 'panel',
+      description: 'Guard panelini açar'
+    };
+    await client.application.commands.create(command);
   });
 
+  // Interaction event’i
   client.on("interactionCreate", async (interaction) => {
     if (!interaction.isButton()) return; // sadece butonları dinleriz
 
