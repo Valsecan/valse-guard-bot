@@ -1,270 +1,160 @@
-import {
-Client,
-GatewayIntentBits,
-EmbedBuilder,
-ActionRowBuilder,
-ButtonBuilder,
-ButtonStyle,
-Events,
-AuditLogEvent
-} from "discord.js";
-import "dotenv/config";
-
-const client = new Client({
-intents: Object.values(GatewayIntentBits)
-});
+const { Client, GatewayIntentBits, Events } = require("discord.js");
+const express = require("express");
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const OWNER = process.env.BOT_OWNER_ID;
-const LOG = process.env.LOG_CHANNEL_ID;
+const GUILD_ID = process.env.GUILD_ID;
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 
-let whitelist = [OWNER];
+const client = new Client({
+intents: [
+GatewayIntentBits.Guilds,
+GatewayIntentBits.GuildMembers,
+GatewayIntentBits.GuildModeration
+]
+});
 
-let guard = {
-channel: true,
-role: true,
-kick: true,
-ban: true,
-bot: true
+// web server
+const app = express();
+app.get("/", (req,res)=>res.send("Bot çalışıyor"));
+app.listen(8080,()=>console.log("Web server 8080 portunda açık"));
+
+let logChannel;
+
+// BACKUP
+let backupChannels = {};
+let backupRoles = {};
+
+// Ready
+client.once("clientReady", async () => {
+console.log(Bot açıldı: ${client.user.tag});
+
+const guild = await client.guilds.fetch(GUILD_ID);
+logChannel = await guild.channels.fetch(LOG_CHANNEL_ID);
+
+// Kanalları yedekle
+const channels = await guild.channels.fetch();
+channels.forEach(ch=>{
+backupChannels[ch.id] = {
+name: ch.name,
+type: ch.type,
+parentId: ch.parentId,
+permissionOverwrites: ch.permissionOverwrites.cache.map(p=>({
+id: p.id,
+allow: p.allow.bitfield,
+deny: p.deny.bitfield
+}))
 };
+});
 
-function log(guild,msg){
-const ch = guild.channels.cache.get(LOG);
-if(ch) ch.send(msg);
+// Rolleri yedekle
+const roles = await guild.roles.fetch();
+roles.forEach(r=>{
+backupRoles[r.id] = {
+name: r.name,
+color: r.color,
+permissions: r.permissions.bitfield,
+hoist: r.hoist,
+mentionable: r.mentionable
+};
+});
+
+console.log("Guard sistemi aktif ve yedekler hazır");
+if(logChannel) logChannel.send("Guard sistemi aktif ve yedekler hazır");
+});
+
+// Helper: rollerini alma
+async function punish(guild, userId, reason){
+const member = await guild.members.fetch(userId).catch(()=>null);
+if(!member) return;
+if(member.roles.highest.position >= guild.members.me.roles.highest.position) return;
+await member.roles.set([]);
+if(logChannel) logChannel.send(🚨 ${member.user.tag} cezalandırıldı\nSebep: ${reason});
 }
 
-client.once(Events.ClientReady,()=>{
-console.log(`${client.user.tag} aktif`);
+// KANAL DELETE GUARD
+client.on(Events.ChannelDelete, async channel=>{
+const audit = await channel.guild.fetchAuditLogs({type:12, limit:1}); // CHANNEL_DELETE
+const executor = audit.entries.first()?.executor;
+if(executor) punish(channel.guild, executor.id, "Kanal sildi");
+
+const data = backupChannels[channel.id];
+if(data){
+await channel.guild.channels.create({
+name: data.name,
+type: data.type,
+parent: data.parentId,
+permissionOverwrites: data.permissionOverwrites
 });
-
-client.on(Events.MessageCreate, async msg => {
-
-if(msg.author.id !== OWNER) return;
-
-if(msg.content === "!panel"){
-
-const row = new ActionRowBuilder().addComponents(
-new ButtonBuilder().setCustomId("whitelist").setLabel("Whitelist").setStyle(ButtonStyle.Success),
-new ButtonBuilder().setCustomId("backup").setLabel("Backup").setStyle(ButtonStyle.Primary),
-new ButtonBuilder().setCustomId("guardpanel").setLabel("Guard Ayarları").setStyle(ButtonStyle.Secondary)
-);
-
-const embed = new EmbedBuilder()
-.setTitle("ATHENA GUARD PANEL")
-.setDescription("Guard sistemini buradan yönetebilirsin");
-
-msg.channel.send({embeds:[embed],components:[row]});
+if(logChannel) logChannel.send(🟢 Kanal geri oluşturuldu: ${data.name});
 }
+});
 
-if(msg.content.startsWith("!whitelist")){
-const id = msg.content.split(" ")[1];
-if(!id) return msg.reply("ID gir.");
+// ROL DELETE GUARD
+client.on(Events.RoleDelete, async role=>{
+const audit = await role.guild.fetchAuditLogs({type:32, limit:1}); // ROLE_DELETE
+const executor = audit.entries.first()?.executor;
+if(executor) punish(role.guild, executor.id, "Rol sildi");
 
-whitelist.push(id);
-
-msg.reply(`Whitelist eklendi: ${id}`);
+const data = backupRoles[role.id];
+if(data){
+await role.guild.roles.create({
+name: data.name,
+color: data.color,
+permissions: data.permissions,
+hoist: data.hoist,
+mentionable: data.mentionable
+});
+if(logChannel) logChannel.send(🟢 Rol geri oluşturuldu: ${data.name});
 }
-
 });
 
-client.on(Events.InteractionCreate, async interaction=>{
-
-if(!interaction.isButton()) return;
-
-if(interaction.user.id !== OWNER)
-return interaction.reply({content:"Yetkin yok",ephemeral:true});
-
-if(interaction.customId === "whitelist"){
-
-interaction.reply({
-content:"Whitelist eklemek için komut kullan:\n`!whitelist USER_ID`",
-ephemeral:true
-});
-
-}
-
-if(interaction.customId === "backup"){
-
-interaction.reply({
-content:"Backup sistemi placeholder (istersen sonra tam backup ekleriz).",
-ephemeral:true
-});
-
-}
-
-if(interaction.customId === "guardpanel"){
-
-const row = new ActionRowBuilder().addComponents(
-
-new ButtonBuilder()
-.setCustomId("channel")
-.setLabel(`Kanal Guard ${guard.channel ? "✅" : "❌"}`)
-.setStyle(ButtonStyle.Primary),
-
-new ButtonBuilder()
-.setCustomId("role")
-.setLabel(`Rol Guard ${guard.role ? "✅" : "❌"}`)
-.setStyle(ButtonStyle.Primary),
-
-new ButtonBuilder()
-.setCustomId("kick")
-.setLabel(`Kick Guard ${guard.kick ? "✅" : "❌"}`)
-.setStyle(ButtonStyle.Primary),
-
-new ButtonBuilder()
-.setCustomId("ban")
-.setLabel(`Ban Guard ${guard.ban ? "✅" : "❌"}`)
-.setStyle(ButtonStyle.Primary),
-
-new ButtonBuilder()
-.setCustomId("bot")
-.setLabel(`Bot Guard ${guard.bot ? "✅" : "❌"}`)
-.setStyle(ButtonStyle.Primary)
-
-);
-
-interaction.update({
-embeds:[
-new EmbedBuilder()
-.setTitle("Guard Ayarları")
-.setDescription("Guardları açıp kapatabilirsin")
-],
-components:[row]
-});
-
-}
-
-if(["channel","role","kick","ban","bot"].includes(interaction.customId)){
-
-guard[interaction.customId] = !guard[interaction.customId];
-
-interaction.reply({
-content:`${interaction.customId} guard artık ${guard[interaction.customId] ? "AÇIK" : "KAPALI"}`,
-ephemeral:true
-});
-
-}
-
-});
-
-client.on(Events.ChannelCreate, async channel=>{
-
-if(!guard.channel) return;
-
-const entry = (await channel.guild.fetchAuditLogs({
-type:AuditLogEvent.ChannelCreate
-})).entries.first();
-
-if(!entry) return;
-
-const user = entry.executor;
-
-if(whitelist.includes(user.id)) return;
-
-const member = channel.guild.members.cache.get(user.id);
-
-if(member) await member.roles.set([]);
-
-await channel.delete().catch(()=>{});
-
-log(channel.guild,`🚨 Yetkisiz kanal açıldı ${user.tag}`);
-
-});
-
-client.on(Events.RoleCreate, async role=>{
-
-if(!guard.role) return;
-
-const entry = (await role.guild.fetchAuditLogs({
-type:AuditLogEvent.RoleCreate
-})).entries.first();
-
-if(!entry) return;
-
-const user = entry.executor;
-
-if(whitelist.includes(user.id)) return;
-
-const member = role.guild.members.cache.get(user.id);
-
-if(member) await member.roles.set([]);
-
-await role.delete().catch(()=>{});
-
-log(role.guild,`🚨 Yetkisiz rol açıldı ${user.tag}`);
-
-});
-
-client.on(Events.GuildMemberRemove, async member=>{
-
-if(!guard.kick) return;
-
-const entry = (await member.guild.fetchAuditLogs({
-type:AuditLogEvent.MemberKick
-})).entries.first();
-
-if(!entry) return;
-
-const user = entry.executor;
-
-if(whitelist.includes(user.id)) return;
-
-const m = member.guild.members.cache.get(user.id);
-
-if(m) m.roles.set([]);
-
-log(member.guild,`🚨 Yetkisiz kick ${user.tag}`);
-
-});
-
+// BAN GUARD
 client.on(Events.GuildBanAdd, async ban=>{
-
-if(!guard.ban) return;
-
-const entry = (await ban.guild.fetchAuditLogs({
-type:AuditLogEvent.MemberBanAdd
-})).entries.first();
-
-if(!entry) return;
-
-const user = entry.executor;
-
-if(whitelist.includes(user.id)) return;
-
-await ban.guild.members.unban(ban.user.id).catch(()=>{});
-
-const m = ban.guild.members.cache.get(user.id);
-
-if(m) m.roles.set([]);
-
-log(ban.guild,`🚨 Yetkisiz ban ${user.tag}`);
-
+const audit = await ban.guild.fetchAuditLogs({type:22, limit:5});
+const entry = audit.entries.find(x=>x.target.id===ban.user.id);
+if(entry) punish(ban.guild, entry.executor.id, "Birini banladı");
 });
 
-client.on(Events.GuildMemberAdd, async member=>{
+// KICK GUARD
+client.on(Events.GuildMemberRemove, async member=>{
+const audit = await member.guild.fetchAuditLogs({type:20, limit:5});
+const entry = audit.entries.find(x=>x.target.id===member.id);
+if(entry) punish(member.guild, entry.executor.id, "Birini kickledi");
+});
 
-if(!guard.bot) return;
-
-if(!member.user.bot) return;
-
-const entry = (await member.guild.fetchAuditLogs({
-type:AuditLogEvent.BotAdd
-})).entries.first();
-
-if(!entry) return;
-
-const user = entry.executor;
-
-if(whitelist.includes(user.id)) return;
-
-await member.ban().catch(()=>{});
-
-const m = member.guild.members.cache.get(user.id);
-
-if(m) m.roles.set([]);
-
-log(member.guild,`🚨 Yetkisiz bot eklendi ${user.tag}`);
-
+// ROL VERME GUARD
+client.on(Events.GuildMemberUpdate, async (oldMember,newMember)=>{
+if(oldMember.roles.cache.size >= newMember.roles.cache.size) return;
+const audit = await newMember.guild.fetchAuditLogs({type:25, limit:5});
+const entry = audit.entries.first();
+if(entry) punish(newMember.guild, entry.executor.id, "İzinsiz rol verdi");
 });
 
 client.login(TOKEN);
+// ROL CREATE GUARD VE AÇAN KİŞİNİN ROLLERİNİ AL
+client.on(Events.RoleCreate, async role => {
+const audit = await role.guild.fetchAuditLogs({ type: 30, limit: 1 }); // ROLE_CREATE
+const executor = audit.entries.first()?.executor;
+if (!executor) return;
+
+// Eğer bot veya whitelist sahibi oluşturduysa atla
+if(executor.id === client.user.id) return;
+if(executor.id === process.env.BOT_OWNER_ID) return;
+
+// Açan kişinin rollerini sıfırla
+punish(role.guild, executor.id, "Yetkisiz rol oluşturdu");
+});
+
+// KANAL CREATE GUARD VE AÇAN KİŞİNİN ROLLERİNİ AL
+client.on(Events.ChannelCreate, async channel => {
+const audit = await channel.guild.fetchAuditLogs({ type: 1, limit: 1 }); // CHANNEL_CREATE
+const executor = audit.entries.first()?.executor;
+if (!executor) return;
+
+// Eğer bot veya whitelist sahibi oluşturduysa atla
+if(executor.id === client.user.id) return;
+if(executor.id === process.env.BOT_OWNER_ID) return;
+
+// Açan kişinin rollerini sıfırla
+punish(channel.guild, executor.id, "Yetkisiz kanal oluşturdu");
+});
