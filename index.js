@@ -26,7 +26,7 @@ let backupRoles = {};
 
 // Ready
 client.once("clientReady", async () => {
-  console.log(Bot açıldı: ${client.user.tag});
+  console.log(`Bot açıldı: ${client.user.tag}`);
 
   const guild = await client.guilds.fetch(GUILD_ID);
   logChannel = await guild.channels.fetch(LOG_CHANNEL_ID);
@@ -68,7 +68,7 @@ async function punish(guild, userId, reason){
   if(!member) return;
   if(member.roles.highest.position >= guild.members.me.roles.highest.position) return;
   await member.roles.set([]);
-  if(logChannel) logChannel.send(🚨 ${member.user.tag} cezalandırıldı\nSebep: ${reason});
+  if(logChannel) logChannel.send(`🚨 ${member.user.tag} cezalandırıldı\nSebep: ${reason}`);
 }
 
 // KANAL DELETE GUARD
@@ -85,7 +85,7 @@ client.on(Events.ChannelDelete, async channel=>{
       parent: data.parentId,
       permissionOverwrites: data.permissionOverwrites
     });
-    if(logChannel) logChannel.send(🟢 Kanal geri oluşturuldu: ${data.name});
+    if(logChannel) logChannel.send(`🟢 Kanal geri oluşturuldu: ${data.name}`);
   }
 });
 
@@ -104,7 +104,7 @@ client.on(Events.RoleDelete, async role=>{
       hoist: data.hoist,
       mentionable: data.mentionable
     });
-    if(logChannel) logChannel.send(🟢 Rol geri oluşturuldu: ${data.name});
+    if(logChannel) logChannel.send(`🟢 Rol geri oluşturuldu: ${data.name}`);
   }
 });
 
