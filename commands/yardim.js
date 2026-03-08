@@ -1,13 +1,13 @@
 import { SlashCommandBuilder } from 'discord.js';
-
-export const data = new SlashCommandBuilder()
-  .setName('yardim')
-  .setDescription('Komutları ve ne işe yaradıklarını gösterir');
-
-export async function execute(interaction) {
-  await interaction.reply(`
-**/yardim** - Komutları gösterir
-**/whitelist** - Dokunulmazları ayarla
-**/settings** - Guardları aç/kapat
-  `);
-}
+export default {
+    data: new SlashCommandBuilder()
+        .setName('yardim')
+        .setDescription('Komutları ve açıklamalarını gösterir'),
+    async execute(interaction){
+        await interaction.reply(`
+/yardim - Komutları gösterir
+/whitelist - Dokunulmaz kullanıcı ekle/kaldır
+/settings - Guard ayarlarını aç/kapa
+        `);
+    }
+};
