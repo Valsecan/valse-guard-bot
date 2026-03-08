@@ -19,7 +19,7 @@ require("./systems/guard")(client)
 require("./systems/backup")(client)
 require("./systems/whitelist")(client)
 
-client.once("ready",()=>{
+client.once("clientReady",()=>{
  console.log(`Bot açıldı: ${client.user.tag}`)
 })
 
