@@ -1,0 +1,9 @@
+{
+  "roleGuard": true,
+  "channelGuard": true,
+  "kickGuard": true,
+  "banGuard": true,
+  "botGuard": true,
+  "webhookGuard": true,
+  "emojiGuard": true
+}
