@@ -1,19 +1,11 @@
 import { SlashCommandBuilder } from 'discord.js';
-
-export const data = new SlashCommandBuilder()
-  .setName('settings')
-  .setDescription('Guardları aç/kapat')
-  .addStringOption(option =>
-    option.setName('guard')
-      .setDescription('Hangi guard? kanal/rol/üye')
-      .setRequired(true))
-  .addBooleanOption(option =>
-    option.setName('durum')
-      .setDescription('Aç/kapat')
-      .setRequired(true));
-
-export async function execute(interaction) {
-  const guard = interaction.options.getString('guard');
-  const durum = interaction.options.getBoolean('durum');
-  await interaction.reply(`${guard} guard ${durum ? 'açıldı' : 'kapatıldı'}`);
+export default {
+    data: new SlashCommandBuilder()
+        .setName('settings')
+        .setDescription('Guard ayarlarını aç/kapa')
+        .addStringOption(option => option.setName('guard').setDescription('Aç/kapa: kanal, rol, üye')),
+    async execute(interaction){
+        if(interaction.user.id !== process.env.BOT_OWNER_ID) return interaction.reply('Geçersiz guard!');
+        await interaction.reply('Guard ayarı güncellendi!');
     }
+};
