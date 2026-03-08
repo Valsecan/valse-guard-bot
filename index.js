@@ -14,7 +14,6 @@ const client = new Client({ intents: Object.values(GatewayIntentBits) });
 const TOKEN = process.env.DISCORD_TOKEN;
 const OWNER = process.env.BOT_OWNER_ID;
 const LOG_CHANNEL = process.env.LOG_CHANNEL_ID;
-const GUILD_ID = process.env.GUILD_ID;
 
 let whitelist = [OWNER];
 
@@ -29,46 +28,50 @@ let guardSettings = {
 
 // Log fonksiyonu
 function log(guild, text){
-  if(guild.id !== GUILD_ID) return;
   const channel = guild.channels.cache.get(LOG_CHANNEL);
   if(channel) channel.send({content: text});
 }
 
-client.once("ready", () => console.log(`${client.user.tag} aktif`));
+// Bot hazır olunca
+client.once(Events.ClientReady, () => console.log(`${client.user.tag} aktif`));
 
-// Kanal oluşturulursa
+// Kanal oluşturma guard
 client.on(Events.ChannelCreate, async channel => {
-  if(!guardSettings.channel || channel.guild.id !== GUILD_ID) return;
+  if(!guardSettings.channel) return;
   const entry = (await channel.guild.fetchAuditLogs({type:1})).entries.first();
-  const user = entry.executor;
-  if(whitelist.includes(user.id)) return;
+  const user = entry?.executor;
+  if(!user || whitelist.includes(user.id)) return;
   const member = channel.guild.members.cache.get(user.id);
   if(member) await member.roles.set([]);
-  await channel.delete().catch(()=>{});
   log(channel.guild, `🚨 Yetkisiz kanal açıldı: ${channel.name} / Açan: ${user.tag}`);
 });
 
-// Kanal silinirse
+// Kanal silme guard (backup için log)
 client.on(Events.ChannelDelete, async channel => {
-  if(channel.guild.id !== GUILD_ID) return;
+  if(!guardSettings.channel) return;
   log(channel.guild, `❌ Kanal silindi: ${channel.name}`);
 });
 
-// Rol oluşturulursa
+// Rol oluşturma guard
 client.on(Events.RoleCreate, async role => {
-  if(!guardSettings.role || role.guild.id !== GUILD_ID) return;
+  if(!guardSettings.role) return;
   const entry = (await role.guild.fetchAuditLogs({type:30})).entries.first();
-  const user = entry.executor;
-  if(whitelist.includes(user.id)) return;
+  const user = entry?.executor;
+  if(!user || whitelist.includes(user.id)) return;
   const member = role.guild.members.cache.get(user.id);
   if(member) await member.roles.set([]);
-  await role.delete().catch(()=>{});
   log(role.guild, `🚨 Yetkisiz rol açıldı: ${role.name} / Açan: ${user.tag}`);
 });
 
-// Kick Guard
+// Rol silme guard (log)
+client.on(Events.RoleDelete, async role => {
+  if(!guardSettings.role) return;
+  log(role.guild, `❌ Rol silindi: ${role.name}`);
+});
+
+// Kick guard
 client.on(Events.GuildMemberRemove, async member => {
-  if(!guardSettings.kick || member.guild.id !== GUILD_ID) return;
+  if(!guardSettings.kick) return;
   const entry = (await member.guild.fetchAuditLogs({type:20})).entries.first();
   const user = entry?.executor;
   if(!user || whitelist.includes(user.id)) return;
@@ -77,41 +80,38 @@ client.on(Events.GuildMemberRemove, async member => {
   log(member.guild, `🚨 Yetkisiz kick / Kişi: ${user.tag}`);
 });
 
-// Ban Guard
+// Ban guard
 client.on(Events.GuildBanAdd, async ban => {
-  if(!guardSettings.ban || ban.guild.id !== GUILD_ID) return;
+  if(!guardSettings.ban) return;
   const entry = (await ban.guild.fetchAuditLogs({type:22})).entries.first();
   const user = entry?.executor;
   if(!user || whitelist.includes(user.id)) return;
-  await ban.guild.members.unban(ban.user.id).catch(()=>{});
+  ban.guild.members.unban(ban.user.id);
   const m = ban.guild.members.cache.get(user.id);
   if(m) m.roles.set([]);
   log(ban.guild, `🚨 Yetkisiz ban / Kişi: ${user.tag}`);
 });
 
-// Bot Guard
+// Bot guard
 client.on(Events.GuildMemberAdd, async member => {
-  if(!guardSettings.bot || member.guild.id !== GUILD_ID) return;
+  if(!guardSettings.bot) return;
   if(!member.user.bot) return;
   const entry = (await member.guild.fetchAuditLogs({type:28})).entries.first();
   const user = entry?.executor;
   if(!user || whitelist.includes(user.id)) return;
-  await member.ban().catch(()=>{});
+  await member.ban();
   const m = member.guild.members.cache.get(user.id);
   if(m) m.roles.set([]);
   log(member.guild, `🚨 Yetkisiz bot eklendi / Ekleyen: ${user.tag}`);
 });
 
-// Komut sistemi
+// Komut sistemi ve panel
 client.on(Events.MessageCreate, async message => {
-  if(message.guild?.id !== GUILD_ID) return;
-  if(!message.content.startsWith("!")) return;
-
+  if(message.author.id !== OWNER) return;
   const args = message.content.split(" ");
-  const cmd = args[0];
+  const cmd = args[0].toLowerCase();
 
-  // Panel
-  if(cmd === "!panel" && message.author.id === OWNER){
+  if(cmd === "!panel"){
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("whitelist").setLabel("Whitelist").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId("backup").setLabel("Backup").setStyle(ButtonStyle.Primary),
@@ -121,25 +121,19 @@ client.on(Events.MessageCreate, async message => {
     message.channel.send({embeds:[embed], components:[row]});
   }
 
-  // Whitelist ekleme
-  if(cmd === "!whitelist" && message.author.id === OWNER){
+  if(cmd === "!whitelist"){
     const id = args[1];
-    if(!id) return message.reply("ID belirt.");
+    if(!id) return message.reply("Kullanıcı ID giriniz!");
     whitelist.push(id);
-    message.reply("Whitelist eklendi ✅");
-  }
-
-  // Backup placeholder
-  if(cmd === "!backup" && message.author.id === OWNER){
-    message.reply("Backup işlemleri burada olacak (placeholder).");
+    message.reply(`✅ ${id} whitelist’e eklendi`);
   }
 });
 
-// Buton etkileşimleri
+// Panel buton etkileşimleri
 client.on(Events.InteractionCreate, async interaction => {
-  if(!interaction.isButton() || interaction.guild?.id !== GUILD_ID) return;
+  if(!interaction.isButton()) return;
 
-  // Guard ayar paneli
+  // Guard ayarları paneli
   if(interaction.customId === "guard"){
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("channelGuard").setLabel(`Kanal Guard: ${guardSettings.channel ? "✅" : "❌"}`).setStyle(ButtonStyle.Primary),
@@ -152,13 +146,17 @@ client.on(Events.InteractionCreate, async interaction => {
     await interaction.update({embeds:[embed], components:[row]});
   }
 
-  // Guard toggle
+  // Guard aç/kapa butonları
   if(["channelGuard","roleGuard","kickGuard","banGuard","botGuard"].includes(interaction.customId)){
     const key = interaction.customId.replace("Guard","").toLowerCase();
     guardSettings[key] = !guardSettings[key];
     await interaction.update({content:`${key} guard durumu: ${guardSettings[key] ? "✅ Açık" : "❌ Kapalı"}`, components:[]});
     log(interaction.guild, `⚙️ ${key} guard durumu değişti: ${guardSettings[key] ? "Açık" : "Kapalı"}`);
   }
+
+  // Whitelist ve Backup butonları (sadece mesaj ile panel eklenebilir)
+  if(interaction.customId === "whitelist") await interaction.reply({content:"Whitelist butonu tıklandı!", ephemeral:true});
+  if(interaction.customId === "backup") await interaction.reply({content:"Backup butonu tıklandı!", ephemeral:true});
 });
 
 client.login(TOKEN);
