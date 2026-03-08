@@ -7,11 +7,11 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildModeration
   ],
-  partials: ['GUILD_MEMBER', 'CHANNEL', 'MESSAGE', 'REACTION', 'USER'] // partials ekliyoruz
+  partials: ['GUILD_MEMBER', 'CHANNEL', 'MESSAGE', 'REACTION', 'USER'] // partials ekle
 });
 
 client.once("clientReady", () => {
-  console.log(`Bot açıldı: ${client.user.tag}`);
+  console.log(`Bot aktif: ${client.user.tag}`);
 });
 
 client.login(process.env.TOKEN); // token'ı environment variable'dan alıyoruz
