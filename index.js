@@ -1,162 +1,270 @@
-import { 
-  Client, 
-  GatewayIntentBits, 
-  EmbedBuilder, 
-  ActionRowBuilder, 
-  ButtonBuilder, 
-  ButtonStyle, 
-  Events 
+import {
+Client,
+GatewayIntentBits,
+EmbedBuilder,
+ActionRowBuilder,
+ButtonBuilder,
+ButtonStyle,
+Events,
+AuditLogEvent
 } from "discord.js";
 import "dotenv/config";
 
-const client = new Client({ intents: Object.values(GatewayIntentBits) });
+const client = new Client({
+intents: Object.values(GatewayIntentBits)
+});
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const OWNER = process.env.BOT_OWNER_ID;
-const LOG_CHANNEL = process.env.LOG_CHANNEL_ID;
+const LOG = process.env.LOG_CHANNEL_ID;
 
 let whitelist = [OWNER];
 
-// Guard ayarları
-let guardSettings = {
-  channel: true,
-  role: true,
-  kick: true,
-  ban: true,
-  bot: true
+let guard = {
+channel: true,
+role: true,
+kick: true,
+ban: true,
+bot: true
 };
 
-// Log fonksiyonu
-function log(guild, text){
-  const channel = guild.channels.cache.get(LOG_CHANNEL);
-  if(channel) channel.send({content: text});
+function log(guild,msg){
+const ch = guild.channels.cache.get(LOG);
+if(ch) ch.send(msg);
 }
 
-// Bot hazır olunca
-client.once(Events.ClientReady, () => console.log(`${client.user.tag} aktif`));
-
-// Kanal oluşturma guard
-client.on(Events.ChannelCreate, async channel => {
-  if(!guardSettings.channel) return;
-  const entry = (await channel.guild.fetchAuditLogs({type:1})).entries.first();
-  const user = entry?.executor;
-  if(!user || whitelist.includes(user.id)) return;
-  const member = channel.guild.members.cache.get(user.id);
-  if(member) await member.roles.set([]);
-  log(channel.guild, `🚨 Yetkisiz kanal açıldı: ${channel.name} / Açan: ${user.tag}`);
+client.once(Events.ClientReady,()=>{
+console.log(`${client.user.tag} aktif`);
 });
 
-// Kanal silme guard (backup için log)
-client.on(Events.ChannelDelete, async channel => {
-  if(!guardSettings.channel) return;
-  log(channel.guild, `❌ Kanal silindi: ${channel.name}`);
+client.on(Events.MessageCreate, async msg => {
+
+if(msg.author.id !== OWNER) return;
+
+if(msg.content === "!panel"){
+
+const row = new ActionRowBuilder().addComponents(
+new ButtonBuilder().setCustomId("whitelist").setLabel("Whitelist").setStyle(ButtonStyle.Success),
+new ButtonBuilder().setCustomId("backup").setLabel("Backup").setStyle(ButtonStyle.Primary),
+new ButtonBuilder().setCustomId("guardpanel").setLabel("Guard Ayarları").setStyle(ButtonStyle.Secondary)
+);
+
+const embed = new EmbedBuilder()
+.setTitle("ATHENA GUARD PANEL")
+.setDescription("Guard sistemini buradan yönetebilirsin");
+
+msg.channel.send({embeds:[embed],components:[row]});
+}
+
+if(msg.content.startsWith("!whitelist")){
+const id = msg.content.split(" ")[1];
+if(!id) return msg.reply("ID gir.");
+
+whitelist.push(id);
+
+msg.reply(`Whitelist eklendi: ${id}`);
+}
+
 });
 
-// Rol oluşturma guard
-client.on(Events.RoleCreate, async role => {
-  if(!guardSettings.role) return;
-  const entry = (await role.guild.fetchAuditLogs({type:30})).entries.first();
-  const user = entry?.executor;
-  if(!user || whitelist.includes(user.id)) return;
-  const member = role.guild.members.cache.get(user.id);
-  if(member) await member.roles.set([]);
-  log(role.guild, `🚨 Yetkisiz rol açıldı: ${role.name} / Açan: ${user.tag}`);
+client.on(Events.InteractionCreate, async interaction=>{
+
+if(!interaction.isButton()) return;
+
+if(interaction.user.id !== OWNER)
+return interaction.reply({content:"Yetkin yok",ephemeral:true});
+
+if(interaction.customId === "whitelist"){
+
+interaction.reply({
+content:"Whitelist eklemek için komut kullan:\n`!whitelist USER_ID`",
+ephemeral:true
 });
 
-// Rol silme guard (log)
-client.on(Events.RoleDelete, async role => {
-  if(!guardSettings.role) return;
-  log(role.guild, `❌ Rol silindi: ${role.name}`);
+}
+
+if(interaction.customId === "backup"){
+
+interaction.reply({
+content:"Backup sistemi placeholder (istersen sonra tam backup ekleriz).",
+ephemeral:true
 });
 
-// Kick guard
-client.on(Events.GuildMemberRemove, async member => {
-  if(!guardSettings.kick) return;
-  const entry = (await member.guild.fetchAuditLogs({type:20})).entries.first();
-  const user = entry?.executor;
-  if(!user || whitelist.includes(user.id)) return;
-  const m = member.guild.members.cache.get(user.id);
-  if(m) m.roles.set([]);
-  log(member.guild, `🚨 Yetkisiz kick / Kişi: ${user.tag}`);
+}
+
+if(interaction.customId === "guardpanel"){
+
+const row = new ActionRowBuilder().addComponents(
+
+new ButtonBuilder()
+.setCustomId("channel")
+.setLabel(`Kanal Guard ${guard.channel ? "✅" : "❌"}`)
+.setStyle(ButtonStyle.Primary),
+
+new ButtonBuilder()
+.setCustomId("role")
+.setLabel(`Rol Guard ${guard.role ? "✅" : "❌"}`)
+.setStyle(ButtonStyle.Primary),
+
+new ButtonBuilder()
+.setCustomId("kick")
+.setLabel(`Kick Guard ${guard.kick ? "✅" : "❌"}`)
+.setStyle(ButtonStyle.Primary),
+
+new ButtonBuilder()
+.setCustomId("ban")
+.setLabel(`Ban Guard ${guard.ban ? "✅" : "❌"}`)
+.setStyle(ButtonStyle.Primary),
+
+new ButtonBuilder()
+.setCustomId("bot")
+.setLabel(`Bot Guard ${guard.bot ? "✅" : "❌"}`)
+.setStyle(ButtonStyle.Primary)
+
+);
+
+interaction.update({
+embeds:[
+new EmbedBuilder()
+.setTitle("Guard Ayarları")
+.setDescription("Guardları açıp kapatabilirsin")
+],
+components:[row]
 });
 
-// Ban guard
-client.on(Events.GuildBanAdd, async ban => {
-  if(!guardSettings.ban) return;
-  const entry = (await ban.guild.fetchAuditLogs({type:22})).entries.first();
-  const user = entry?.executor;
-  if(!user || whitelist.includes(user.id)) return;
-  ban.guild.members.unban(ban.user.id);
-  const m = ban.guild.members.cache.get(user.id);
-  if(m) m.roles.set([]);
-  log(ban.guild, `🚨 Yetkisiz ban / Kişi: ${user.tag}`);
+}
+
+if(["channel","role","kick","ban","bot"].includes(interaction.customId)){
+
+guard[interaction.customId] = !guard[interaction.customId];
+
+interaction.reply({
+content:`${interaction.customId} guard artık ${guard[interaction.customId] ? "AÇIK" : "KAPALI"}`,
+ephemeral:true
 });
 
-// Bot guard
-client.on(Events.GuildMemberAdd, async member => {
-  if(!guardSettings.bot) return;
-  if(!member.user.bot) return;
-  const entry = (await member.guild.fetchAuditLogs({type:28})).entries.first();
-  const user = entry?.executor;
-  if(!user || whitelist.includes(user.id)) return;
-  await member.ban();
-  const m = member.guild.members.cache.get(user.id);
-  if(m) m.roles.set([]);
-  log(member.guild, `🚨 Yetkisiz bot eklendi / Ekleyen: ${user.tag}`);
+}
+
 });
 
-// Komut sistemi ve panel
-client.on(Events.MessageCreate, async message => {
-  if(message.author.id !== OWNER) return;
-  const args = message.content.split(" ");
-  const cmd = args[0].toLowerCase();
+client.on(Events.ChannelCreate, async channel=>{
 
-  if(cmd === "!panel"){
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("whitelist").setLabel("Whitelist").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId("backup").setLabel("Backup").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("guard").setLabel("Guard Ayarları").setStyle(ButtonStyle.Secondary)
-    );
-    const embed = new EmbedBuilder().setTitle("Guard Panel").setDescription("Butonlardan işlem yapabilirsiniz");
-    message.channel.send({embeds:[embed], components:[row]});
-  }
+if(!guard.channel) return;
 
-  if(cmd === "!whitelist"){
-    const id = args[1];
-    if(!id) return message.reply("Kullanıcı ID giriniz!");
-    whitelist.push(id);
-    message.reply(`✅ ${id} whitelist’e eklendi`);
-  }
+const entry = (await channel.guild.fetchAuditLogs({
+type:AuditLogEvent.ChannelCreate
+})).entries.first();
+
+if(!entry) return;
+
+const user = entry.executor;
+
+if(whitelist.includes(user.id)) return;
+
+const member = channel.guild.members.cache.get(user.id);
+
+if(member) await member.roles.set([]);
+
+await channel.delete().catch(()=>{});
+
+log(channel.guild,`🚨 Yetkisiz kanal açıldı ${user.tag}`);
+
 });
 
-// Panel buton etkileşimleri
-client.on(Events.InteractionCreate, async interaction => {
-  if(!interaction.isButton()) return;
+client.on(Events.RoleCreate, async role=>{
 
-  // Guard ayarları paneli
-  if(interaction.customId === "guard"){
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("channelGuard").setLabel(`Kanal Guard: ${guardSettings.channel ? "✅" : "❌"}`).setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("roleGuard").setLabel(`Rol Guard: ${guardSettings.role ? "✅" : "❌"}`).setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("kickGuard").setLabel(`Kick Guard: ${guardSettings.kick ? "✅" : "❌"}`).setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("banGuard").setLabel(`Ban Guard: ${guardSettings.ban ? "✅" : "❌"}`).setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("botGuard").setLabel(`Bot Guard: ${guardSettings.bot ? "✅" : "❌"}`).setStyle(ButtonStyle.Primary)
-    );
-    const embed = new EmbedBuilder().setTitle("Guard Ayarları").setDescription("Butonlara basarak guardları açıp kapatabilirsiniz");
-    await interaction.update({embeds:[embed], components:[row]});
-  }
+if(!guard.role) return;
 
-  // Guard aç/kapa butonları
-  if(["channelGuard","roleGuard","kickGuard","banGuard","botGuard"].includes(interaction.customId)){
-    const key = interaction.customId.replace("Guard","").toLowerCase();
-    guardSettings[key] = !guardSettings[key];
-    await interaction.update({content:`${key} guard durumu: ${guardSettings[key] ? "✅ Açık" : "❌ Kapalı"}`, components:[]});
-    log(interaction.guild, `⚙️ ${key} guard durumu değişti: ${guardSettings[key] ? "Açık" : "Kapalı"}`);
-  }
+const entry = (await role.guild.fetchAuditLogs({
+type:AuditLogEvent.RoleCreate
+})).entries.first();
 
-  // Whitelist ve Backup butonları (sadece mesaj ile panel eklenebilir)
-  if(interaction.customId === "whitelist") await interaction.reply({content:"Whitelist butonu tıklandı!", ephemeral:true});
-  if(interaction.customId === "backup") await interaction.reply({content:"Backup butonu tıklandı!", ephemeral:true});
+if(!entry) return;
+
+const user = entry.executor;
+
+if(whitelist.includes(user.id)) return;
+
+const member = role.guild.members.cache.get(user.id);
+
+if(member) await member.roles.set([]);
+
+await role.delete().catch(()=>{});
+
+log(role.guild,`🚨 Yetkisiz rol açıldı ${user.tag}`);
+
+});
+
+client.on(Events.GuildMemberRemove, async member=>{
+
+if(!guard.kick) return;
+
+const entry = (await member.guild.fetchAuditLogs({
+type:AuditLogEvent.MemberKick
+})).entries.first();
+
+if(!entry) return;
+
+const user = entry.executor;
+
+if(whitelist.includes(user.id)) return;
+
+const m = member.guild.members.cache.get(user.id);
+
+if(m) m.roles.set([]);
+
+log(member.guild,`🚨 Yetkisiz kick ${user.tag}`);
+
+});
+
+client.on(Events.GuildBanAdd, async ban=>{
+
+if(!guard.ban) return;
+
+const entry = (await ban.guild.fetchAuditLogs({
+type:AuditLogEvent.MemberBanAdd
+})).entries.first();
+
+if(!entry) return;
+
+const user = entry.executor;
+
+if(whitelist.includes(user.id)) return;
+
+await ban.guild.members.unban(ban.user.id).catch(()=>{});
+
+const m = ban.guild.members.cache.get(user.id);
+
+if(m) m.roles.set([]);
+
+log(ban.guild,`🚨 Yetkisiz ban ${user.tag}`);
+
+});
+
+client.on(Events.GuildMemberAdd, async member=>{
+
+if(!guard.bot) return;
+
+if(!member.user.bot) return;
+
+const entry = (await member.guild.fetchAuditLogs({
+type:AuditLogEvent.BotAdd
+})).entries.first();
+
+if(!entry) return;
+
+const user = entry.executor;
+
+if(whitelist.includes(user.id)) return;
+
+await member.ban().catch(()=>{});
+
+const m = member.guild.members.cache.get(user.id);
+
+if(m) m.roles.set([]);
+
+log(member.guild,`🚨 Yetkisiz bot eklendi ${user.tag}`);
+
 });
 
 client.login(TOKEN);
